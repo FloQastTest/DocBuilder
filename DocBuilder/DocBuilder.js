@@ -1,9 +1,9 @@
-var request = require('supertest');
+var requ = require('supertest');
 var validator = require('validator');
 var fs = require('fs');
 var exec = require('child_process').exec;
 var async = require('async');
-
+var path = require('path');
 /**
  * @class DocBuilder provides wrapper for supertest request module
  * builds out live API docs according to supertest request methods used
@@ -12,7 +12,8 @@ var async = require('async');
  */
 var DocBuilder = function(url){
 	var url = url;
-	var doc = "/** \n";
+	//var doc = "/** \n";
+	var doc = "";
 
 	var endPointArray = [];
 
@@ -20,16 +21,18 @@ var DocBuilder = function(url){
 
 	/**
 	 * @private
-	 * @property {RequestClass} requ Supertest request class held as private property
+	 * @property {RequestClass} this.request Supertest request class held as private property
 	 * @type {RequestClass}
 	 */
-	var requ = request(url);
+	this.request = requ(url);
 
 	/**
 	 * @class EndPointModel provides class blueprint for EndPointRequests
 	 */
 	var EndPointModel = function(){
 		this.name = null;
+
+		this.title = null;
 		//group ex UserGroup (for styling?)
 		this.group = null;
 		//desc ex gets user codes
@@ -40,6 +43,8 @@ var DocBuilder = function(url){
 		this.endpoint = null;
 		//obj
 		this.param = null;
+
+		this.paramExample = null;
 		//obj
 		this.successDesc = null;
 		//obj
@@ -64,9 +69,9 @@ var DocBuilder = function(url){
 	 */
 	var formatObject = function(obj){
 		var str = JSON.stringify(obj);
-		str = str.replace("{","{ \n");
-		str = str.replace("}","\n }");
-		str = str.replace(",",", \n");
+		str = str.replace(new RegExp('{','g'), '{ \n');
+		str = str.replace(new RegExp('}','g'), '} \n');
+		str = str.replace(new RegExp(',','g'), ', \n');
 		return str;
 	}
 
@@ -80,7 +85,7 @@ var DocBuilder = function(url){
 	 */
 	DocBuilder.prototype.get = function(endpoint){
 
-		requ = requ.get(endpoint) || requ;
+		this.request = this.request.get(endpoint) || this.request;
 		var newEndpoint = new EndPointModel();
 		newEndpoint.method = "get";
 		newEndpoint.endpoint = endpoint;
@@ -96,9 +101,22 @@ var DocBuilder = function(url){
 	 * @return {DocBuilder} Return this for fluent 
 	 */
 	DocBuilder.prototype.post = function(endpoint){
-		requ = requ.post(endpoint) || requ;
+		this.request = this.request.post(endpoint) || this.request;
 		var newEndpoint = new EndPointModel();
 		newEndpoint.method = "post";
+		newEndpoint.endpoint = endpoint;
+		
+		currEndpoint = newEndpoint;
+		
+		return this;
+	}
+
+
+	DocBuilder.prototype.del = function(endpoint){
+		
+		this.request = this.request.del(endpoint) || this.request;
+		var newEndpoint = new EndPointModel();
+		newEndpoint.method = "delete";
 		newEndpoint.endpoint = endpoint;
 		
 		currEndpoint = newEndpoint;
@@ -112,11 +130,9 @@ var DocBuilder = function(url){
 	 * @return {DocBuilder} Return this for fluent 
 	 */
 	DocBuilder.prototype.send = function(obj){
-		requ.send(obj);
+		this.request.send(obj);
 		//need to add to endpoint model
-		for (var key in obj){
-
-		}
+		currEndpoint.paramExample = obj;
 		return this;
 	}
 
@@ -127,7 +143,7 @@ var DocBuilder = function(url){
 	 */
 	DocBuilder.prototype.set = function(header,type){
 		
-		requ.set(header,type);
+		this.request.set(header,type);
 		return this;
 	}
 
@@ -139,7 +155,7 @@ var DocBuilder = function(url){
 	 */
 	DocBuilder.prototype.expect = function(header,type){
 		if (typeof header === "number"){
-			requ.expect(header);
+			this.request.expect(header);
 			if (validator.isInt(header,{min: 200, max: 299})){
 				currEndpoint.httpSuccessCode = header;
 			}
@@ -155,7 +171,7 @@ var DocBuilder = function(url){
 			
 		}
 		else if (typeof header === "string"){
-			requ.expect(header,type);
+			this.request.expect(header,type);
 			
 			type = type.toString();
 	    	type = type.replace(/\//g, '');
@@ -181,6 +197,11 @@ var DocBuilder = function(url){
 
 	DocBuilder.prototype.name = function(name){
 		currEndpoint.name = name;
+		return this;
+	}
+
+	DocBuilder.prototype.title = function(title){
+		currEndpoint.title = title;
 		return this;
 	}
 
@@ -225,7 +246,7 @@ var DocBuilder = function(url){
 	DocBuilder.prototype.end = function(cb){
 		
 		var self = this;
-		requ.end(function(err,res){
+		this.request.end(function(err,res){
 			cb && cb(err,res);
 		});
 		return this;
@@ -241,26 +262,51 @@ var DocBuilder = function(url){
 		
 		try {
 		for (var i = 0; i < endPointArray.length; i++) {
+			doc += "/** \n";
 			var x = endPointArray[i];
 			if (x.method != null){
 				doc += "* @api {" + x.method + "} ";
 				if (x.endpoint != null){
 					doc += x.endpoint + " ";
-					if (x.description != null){
-						doc += x.desc + " ";
-					}
+					
 				}
+				if (x.title != null){
+					doc += x.title + " ";
+				}
+
 				doc += "\n";
 			}
 			if (x.name != null){
 				doc += "* @apiName " + x.name + "\n";
 			}
+			if (x.desc != null){
+				doc += "* @apiDescription "+ x.desc + " \n";
+			}
 			if (x.group != null){
 				doc += "* @apiGroup " + x.group + "\n";
 			}
-			if (x.param != null){
-
+			if (x.paramExample != null){
+				
+				/*
+					for (var key in x.paramExample){
+					doc += "* @apiSuccess {" + typeof key + "} " + key + " ";
+					if (x.paramDesc != null){
+						doc += x.paramDesc[key];
+					}
+					doc += "\n";
+					}
+					*/
+					doc += "* @apiParamExample Request-Example: \n";
+					doc += "* 	 HTTP/1.1 ";
+					if (x.httpSuccessCode != null){
+						//need to lookup what error code means!
+						doc += x.httpSuccessCode + " ";
+					}
+					doc += "\n";
+					doc += "* " + formatObject(x.paramExample) + "\n";
+					console.log(doc);
 			}			
+
 			if (x.successExample != null){
 				for (var key in x.successExample){
 					doc += "* @apiSuccess {" + typeof key + "} " + key + " ";
@@ -297,7 +343,8 @@ var DocBuilder = function(url){
 			}
 			
 			
-			doc += "*/";
+			doc += "*/ \n";
+
 			}
 		}
 		catch (e){
@@ -322,7 +369,7 @@ var DocBuilder = function(url){
 			currEndpoint = null;
 		
 			//reset request 
-			requ = request(url);
+			this.request = requ(url);
 			return this;
 		}
 		catch (e){
@@ -345,8 +392,17 @@ var DocBuilder = function(url){
 		
 
 
-
-		//var command = "apidoc -i " + fileName + " -o " + fileName + "/genDocs";
+		var cmdFile = fileName.split("/");
+		
+		if (cmdFile[0] === "."){
+			cmdFile = "./"+cmdFile[1];
+		}
+		else {
+			cmdFile = "./";
+		}
+		
+		
+		var command = "apidoc -i " + cmdFile + " -o " + cmdFile + "/genDocs";
 			
 			
 		
@@ -354,7 +410,11 @@ var DocBuilder = function(url){
 		fs.writeFile(fileName,doc,null,function(err){
 			
 			if (err) cb && cb(err);
-			cb && cb(null, true);
+			exec(command, function(error, stdout, stderr) {
+			  
+			  cb && cb(error, stdout, stderr);
+			});
+			
 		});
 		
 
