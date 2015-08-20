@@ -406,7 +406,7 @@ var DocBuilder = function(url){
 			
 			
 		
-		//callback currently fails, must troubleshoot
+		
 		fs.writeFile(fileName,doc,null,function(err){
 			
 			if (err) cb && cb(err);
